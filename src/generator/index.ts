@@ -124,13 +124,23 @@ ${section.content}
     const categories = (["overview", "architecture", "module", "api", "guide"] as DocCategory[])
       .filter((cat) => sectionsByCategory[cat].length > 0);
 
+    // Link to first document in each category instead of directory
     const categoryLinks = categories
-      .map((cat) => `- [${this.getCategoryTitle(cat)}](/${this.getCategoryDir(cat)}/)`)
+      .map((cat) => {
+        const firstSection = sectionsByCategory[cat][0];
+        const link = `/${this.getCategoryDir(cat)}/${this.sanitizeFileName(firstSection.title)}`;
+        return `- [${this.getCategoryTitle(cat)}](${link})`;
+      })
       .join("\n");
 
     const insights = memory.insights.length > 0
       ? `\n## Key Insights\n\n${memory.insights.map((i) => `- ${i}`).join("\n")}\n`
       : "";
+
+    // Determine the "Get Started" link - use first category's first doc
+    const firstCategory = categories[0];
+    const firstDoc = sectionsByCategory[firstCategory][0];
+    const getStartedLink = `/${this.getCategoryDir(firstCategory)}/${this.sanitizeFileName(firstDoc.title)}`;
 
     const content = `---
 layout: home
@@ -140,7 +150,7 @@ hero:
   actions:
     - theme: brand
       text: Get Started
-      link: /overview/
+      link: ${getStartedLink}
 ---
 
 ${overviewSection ? overviewSection.content : "Welcome to the documentation."}

@@ -6,11 +6,14 @@
 // Agent Configuration
 // ============================================================================
 
+export type DocLanguage = "en" | "zh";
+
 export interface AgentConfig {
   targetDir: string;
   outputDir: string;
   verbose: boolean;
   model: string;
+  language: DocLanguage;
   apiKey?: string;
   baseUrl?: string;
 }

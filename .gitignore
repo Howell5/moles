@@ -23,3 +23,10 @@ docs/
 # Logs
 *.log
 npm-debug.log*
+
+# Local testing
+examples/
+learning/
+
+# Moles state (generated during analysis)
+.moles/

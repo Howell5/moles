@@ -14,7 +14,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src/",
     "format": "biome format --write src/",
-    "check": "biome check --write src/"
+    "check": "biome check --write src/",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs"
   },
   "keywords": [
     "ai",
@@ -26,13 +28,14 @@
   "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@inquirer/prompts": "^8.0.2",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "dotenv": "^17.2.3",
     "glob": "^11.0.0",
-    "marked": "^15.0.4",
     "openai": "^6.10.0",
-    "ora": "^8.1.1"
+    "ora": "^8.1.1",
+    "vitepress": "^1.5.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.8",

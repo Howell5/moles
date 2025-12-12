@@ -8,10 +8,11 @@
  * 4. Loop or Generate: Either continue exploring or generate final docs
  */
 
-import chalk from "chalk";
 import ora, { type Ora } from "ora";
 import { Generator } from "../generator/index.js";
 import type { AgentConfig, AgentState } from "../types.js";
+import { initLogger, type Logger } from "../utils/logger.js";
+import { StateManager } from "../utils/state.js";
 import { Executor } from "./executor.js";
 import { MemoryManager } from "./memory.js";
 import { Planner } from "./planner.js";
@@ -25,6 +26,8 @@ export class Agent {
   private executor: Executor;
   private reflector: Reflector;
   private generator: Generator;
+  private stateManager: StateManager;
+  private logger: Logger;
   private spinner: Ora | null = null;
 
   constructor(config: AgentConfig) {
@@ -35,15 +38,19 @@ export class Agent {
       iterations: 0,
       maxIterations: 10,
     };
+    this.logger = initLogger(config.verbose);
+    this.stateManager = new StateManager(config.targetDir);
     this.memory = new MemoryManager();
     this.planner = new Planner(config);
-    this.executor = new Executor(config, this.memory);
+    this.executor = new Executor(config, this.memory, this.logger, this.stateManager);
     this.reflector = new Reflector(config);
     this.generator = new Generator(config);
   }
 
   async run(): Promise<void> {
-    this.log("Starting documentation generation...\n");
+    // Initialize state directory
+    await this.stateManager.initialize();
+    await this.stateManager.appendLog("Agent started");
 
     // Main Agent loop: Plan → Execute → Reflect → (Loop or Done)
     while (this.state.phase !== "done") {
@@ -64,7 +71,7 @@ export class Agent {
 
       this.state.iterations++;
       if (this.state.iterations >= this.state.maxIterations) {
-        this.log(chalk.yellow("Max iterations reached, generating docs..."));
+        this.logger.warn("Max iterations reached, generating docs...");
         this.state.phase = "generating";
       }
     }
@@ -78,10 +85,14 @@ export class Agent {
       this.state.plan = plan;
       this.memory.setDirectoryStructure(plan.overview);
 
-      this.spinner.succeed("Planning complete");
-      this.logVerbose(`\nPlan overview: ${plan.overview}`);
-      this.logVerbose(`Steps: ${plan.steps.length}`);
-      this.logVerbose(`Focus areas: ${plan.focusAreas.join(", ")}\n`);
+      // Save plan to .moles/plan.md
+      await this.stateManager.savePlan(plan);
+      await this.stateManager.appendLog(`Plan created: ${plan.steps.length} steps`);
+
+      this.spinner.succeed(`Planning complete - ${plan.steps.length} steps`);
+      this.logger.info(`Focus: ${plan.focusAreas.join(", ")}`);
+      this.logger.info(`State saved to .moles/plan.md`);
+      this.logger.setTotalSteps(plan.steps.length);
 
       this.state.phase = "executing";
     } catch (error) {
@@ -95,20 +106,21 @@ export class Agent {
       throw new Error("No plan available for execution");
     }
 
-    this.spinner = ora("Executing: Running ReAct loop...").start();
+    this.logger.phase("📖 Analyzing codebase...");
 
     try {
       await this.executor.execute(this.state.plan);
-      this.spinner.succeed("Execution complete");
 
-      this.logVerbose(`\nAnalyzed ${this.memory.getMemory().analyzedFiles.length} files`);
-      this.logVerbose(
-        `Generated ${this.memory.getMemory().documentSections.length} doc sections\n`,
-      );
+      const mem = this.memory.getMemory();
+      this.logger.summary({
+        files: mem.analyzedFiles.length,
+        sections: mem.documentSections.length,
+        insights: mem.insights.length,
+      });
 
       this.state.phase = "reflecting";
     } catch (error) {
-      this.spinner.fail("Execution failed");
+      this.logger.error("Execution failed");
       throw error;
     }
   }
@@ -119,18 +131,13 @@ export class Agent {
     try {
       const reflection = await this.reflector.reflect(this.memory.getMemory());
 
-      this.spinner.succeed(`Reflection complete (${reflection.completeness}% complete)`);
-
-      this.logVerbose(`\nCompleteness: ${reflection.completeness}%`);
-      if (reflection.missingAreas.length > 0) {
-        this.logVerbose(`Missing areas: ${reflection.missingAreas.join(", ")}`);
-      }
+      this.spinner.succeed(`Reflection: ${reflection.completeness}% complete`);
 
       if (reflection.shouldContinue && this.state.plan) {
-        // Adjust plan based on reflection
+        this.logger.info(`Missing: ${reflection.missingAreas.join(", ")}`);
         this.planner.adjustPlan(this.state.plan, reflection);
+        this.logger.setTotalSteps(this.state.plan.steps.length);
         this.state.phase = "executing";
-        this.logVerbose("Continuing with adjusted plan...\n");
       } else {
         this.state.phase = "generating";
       }
@@ -150,16 +157,6 @@ export class Agent {
     } catch (error) {
       this.spinner.fail("Generation failed");
       throw error;
-    }
-  }
-
-  private log(message: string): void {
-    console.log(message);
-  }
-
-  private logVerbose(message: string): void {
-    if (this.config.verbose) {
-      console.log(chalk.gray(message));
     }
   }
 }

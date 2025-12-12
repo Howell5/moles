@@ -10,120 +10,135 @@
  * This is the core execution engine of the Agent.
  */
 
-import chalk from "chalk";
-import { LLMClient, type LLMMessage } from "../llm/client.js";
-import { ToolRegistry, type OpenAIToolDefinition } from "../tools/index.js";
-import type { AgentConfig, Plan } from "../types.js";
-import type { MemoryManager } from "./memory.js";
+import { LLMClient, type LLMMessage } from '../llm/client.js'
+import { ToolRegistry, type OpenAIToolDefinition } from '../tools/index.js'
+import type { AgentConfig, Plan } from '../types.js'
+import type { Logger } from '../utils/logger.js'
+import type { StateManager } from '../utils/state.js'
+import type { MemoryManager } from './memory.js'
 
 export class Executor {
-  private client: LLMClient;
-  private config: AgentConfig;
-  private memory: MemoryManager;
-  private tools: ToolRegistry;
-  private maxReactIterations = 20;
+  private client: LLMClient
+  private config: AgentConfig
+  private memory: MemoryManager
+  private tools: ToolRegistry
+  private logger: Logger
+  private stateManager: StateManager
+  private maxReactIterations = 20
 
-  constructor(config: AgentConfig, memory: MemoryManager) {
-    this.config = config;
-    this.memory = memory;
-    this.client = new LLMClient(config);
-    this.tools = new ToolRegistry(config.targetDir, memory);
+  constructor(config: AgentConfig, memory: MemoryManager, logger: Logger, stateManager: StateManager) {
+    this.config = config
+    this.memory = memory
+    this.logger = logger
+    this.stateManager = stateManager
+    this.client = new LLMClient(config)
+    this.tools = new ToolRegistry(config.targetDir, memory)
   }
 
   async execute(plan: Plan): Promise<void> {
     // Process each pending step in the plan
     while (plan.currentStepIndex < plan.steps.length) {
-      const step = plan.steps[plan.currentStepIndex];
+      const step = plan.steps[plan.currentStepIndex]
 
-      if (step.status !== "pending") {
-        plan.currentStepIndex++;
-        continue;
+      if (step.status !== 'pending') {
+        plan.currentStepIndex++
+        continue
       }
 
-      step.status = "in_progress";
-      this.logVerbose(`\n📋 Step ${step.id}: ${step.action}`);
-      this.logVerbose(`   Target: ${step.target}`);
+      step.status = 'in_progress'
+      this.logger.stepStart(step.id, step.action, step.target)
 
-      await this.executeStep(step);
+      // Save state before executing
+      await this.stateManager.savePlan(plan)
+      await this.stateManager.appendLog(`Step ${step.id}: ${step.action} → ${step.target}`)
 
-      step.status = "completed";
-      plan.currentStepIndex++;
+      await this.executeStep(step)
+
+      step.status = 'completed'
+      this.logger.stepComplete()
+
+      // Save state after completing
+      await this.stateManager.savePlan(plan)
+      await this.stateManager.saveMemory(this.memory.getMemory())
+
+      plan.currentStepIndex++
     }
   }
 
   private async executeStep(step: { action: string; target: string; reason: string }): Promise<void> {
     const messages: LLMMessage[] = [
       {
-        role: "user",
+        role: 'user',
         content: this.buildStepPrompt(step),
       },
-    ];
+    ]
 
-    const tools = this.getToolDefinitions();
-    let iterations = 0;
+    const tools = this.getToolDefinitions()
+    let iterations = 0
 
     // ReAct loop for this step
     while (iterations < this.maxReactIterations) {
-      iterations++;
+      iterations++
 
-      const response = await this.client.chat(messages, tools);
+      const response = await this.client.chat(messages, tools)
 
       // Process text content (Thought)
       if (response.content) {
-        this.logVerbose(chalk.cyan(`\n💭 Thought: ${response.content}`));
+        this.logger.thought(response.content)
       }
 
       // Process tool calls (Action)
       if (response.toolCalls.length > 0) {
         // Add assistant message with tool_calls (required by OpenAI format)
         messages.push({
-          role: "assistant",
+          role: 'assistant',
           content: response.content,
           tool_calls: response.rawToolCalls,
-        });
+        })
 
         for (const toolCall of response.toolCalls) {
-          this.logVerbose(
-            chalk.yellow(`\n🔧 Action: ${toolCall.name}(${JSON.stringify(toolCall.arguments)})`)
-          );
+          this.logger.action(toolCall.name, toolCall.arguments)
 
           // Execute tool
-          const result = await this.tools.execute(toolCall.name, toolCall.arguments);
+          const result = await this.tools.execute(toolCall.name, toolCall.arguments)
 
           // Observation
-          const observation = result.success
-            ? JSON.stringify(result.data, null, 2)
-            : `Error: ${result.error}`;
+          const observation = result.success ? JSON.stringify(result.data, null, 2) : `Error: ${result.error}`
 
-          this.logVerbose(
-            chalk.green(
-              `\n👁 Observation: ${observation.slice(0, 500)}${observation.length > 500 ? "..." : ""}`
-            )
-          );
+          this.logger.observation(observation, !result.success)
+
+          // Show progress in normal mode for key actions
+          if (toolCall.name === 'write_doc') {
+            this.logger.stepProgress(`Documented: ${(toolCall.arguments as { title?: string }).title || 'section'}`)
+          } else if (toolCall.name === 'read_file') {
+            this.logger.stepProgress(`Reading: ${(toolCall.arguments as { path?: string }).path || 'file'}`)
+          }
 
           // Add tool result to messages
           messages.push({
-            role: "tool",
+            role: 'tool',
             content: observation,
             tool_call_id: toolCall.id,
-          });
+          })
         }
       } else if (response.content) {
         // No tool calls, just text response
         messages.push({
-          role: "assistant",
+          role: 'assistant',
           content: response.content,
-        });
+        })
       }
 
       // Check if we should stop
-      if (response.finishReason === "stop" && response.toolCalls.length === 0) {
-        break;
+      if (response.finishReason === 'stop' && response.toolCalls.length === 0) {
+        break
       }
     }
   }
 
   private buildStepPrompt(step: { action: string; target: string; reason: string }): string {
+    const langInstruction = this.config.language === 'zh' ? '\n\n**IMPORTANT: Write ALL documentation content in Chinese (中文). Code examples and technical terms can remain in English.**' : ''
+
     return `You are a code documentation agent. Your task is to analyze code and generate documentation.
 
 ## Current Memory
@@ -144,18 +159,12 @@ Remember:
 - Read files to understand their purpose
 - Look for patterns, exports, and dependencies
 - Write clear, helpful documentation
-- Add insights you discover to memory
+- Add insights you discover to memory${langInstruction}
 
-Begin your analysis.`;
+Begin your analysis.`
   }
 
   private getToolDefinitions(): OpenAIToolDefinition[] {
-    return this.tools.getToolDefinitions();
-  }
-
-  private logVerbose(message: string): void {
-    if (this.config.verbose) {
-      console.log(message);
-    }
+    return this.tools.getToolDefinitions()
   }
 }
