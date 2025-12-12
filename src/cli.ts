@@ -144,7 +144,7 @@ program
     }
 
     // Check if it's a valid VitePress docs directory
-    const configPath = path.join(absoluteDir, '.vitepress', 'config.ts')
+    const configPath = path.join(absoluteDir, '.vitepress', 'config.mjs')
     if (!fs.existsSync(configPath)) {
       console.error(chalk.red(`\n❌ Not a valid Moles documentation directory`))
       console.error(chalk.dim(`Missing: ${configPath}\n`))
