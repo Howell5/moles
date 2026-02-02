@@ -1,73 +1,135 @@
 # Moles
 
-AI Agent that generates documentation for code repositories.
+An AI-powered documentation agent that analyzes codebases and generates professional VitePress documentation sites.
 
 ## Features
 
-- **AI-Powered Analysis**: Uses LLM to understand code structure and generate meaningful documentation
-- **VitePress Output**: Generates professional documentation site with VitePress
-- **Multi-language**: Supports English and Chinese documentation
-- **Transparent Process**: Saves analysis state to `.moles/` directory for visibility
-- **CLI Tool**: Easy to use command-line interface
+- **AI-Powered Analysis**: Uses LLM with a Plan-Execute-Reflect loop to deeply understand code structure
+- **Agentic Workflow**: Autonomous exploration with planning, execution, reflection, and generation phases
+- **VitePress Output**: Generates production-ready documentation sites with navigation and search
+- **Multi-language Support**: Generate documentation in English or Chinese
+- **Tool-Based Architecture**: Extensible tool system for code analysis (read files, search code, etc.)
+- **Transparent Process**: Saves analysis state to `.moles/` directory for visibility and debugging
+- **OpenAI-Compatible**: Works with any OpenAI-compatible API provider
+
+## Tech Stack
+
+- **Runtime**: Node.js 18+
+- **Language**: TypeScript (ES2022, ESM modules)
+- **LLM Integration**: OpenAI SDK (OpenAI-compatible API format)
+- **Documentation**: VitePress
+- **CLI Framework**: Commander.js
+- **Code Quality**: Biome (linting & formatting)
+
+## Architecture
+
+```
+src/
+├── cli.ts              # CLI entry point with Commander.js
+├── types.ts            # Global type definitions
+├── agent/
+│   ├── index.ts        # Agent coordinator (main loop)
+│   ├── planner.ts      # Creates exploration plans (5-8 steps)
+│   ├── executor.ts     # Executes plan steps using ReAct pattern
+│   ├── memory.ts       # Manages analyzed files and insights
+│   └── reflector.ts    # Evaluates completeness, suggests improvements
+├── generator/
+│   └── index.ts        # Transforms memory into VitePress site
+├── llm/
+│   └── client.ts       # OpenAI-compatible LLM client
+├── tools/
+│   └── index.ts        # Tool registry (list_files, read_file, search_code, etc.)
+└── utils/
+    ├── state.ts        # State persistence (.moles/ directory)
+    └── logger.ts       # Logging utilities
+```
+
+### Agent Loop
+
+The agent follows a **Plan -> Execute -> Reflect -> Generate** workflow:
+
+1. **Planning**: Analyzes codebase structure and creates a focused exploration plan (5-8 steps)
+2. **Executing**: Runs ReAct loop using tools to read files, search code, and build understanding
+3. **Reflecting**: Evaluates documentation completeness (0-100%) and identifies gaps
+4. **Generating**: Creates VitePress documentation site from accumulated memory
 
 ## Installation
 
 ```bash
-# Clone and install
-git clone https://github.com/anthropics/moles.git
+# Clone the repository
+git clone https://github.com/Howell5/moles.git
 cd moles
-npm install
-npm run build
-npm link
 
-# Or install globally (when published)
-npm install -g moles
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+
+# Link for global CLI access
+npm link
 ```
 
 ## Configuration
 
-Create `~/.moles/.env` for global configuration:
+Create a global configuration file at `~/.moles/.env`:
 
 ```bash
 mkdir -p ~/.moles
-cat > ~/.moles/.env << EOF
-ANTHROPIC_API_KEY=your-api-key
-ANTHROPIC_BASE_URL=https://api.anthropic.com/v1  # or your provider
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+
+cat > ~/.moles/.env << 'EOF'
+# Your API key (required)
+ANTHROPIC_API_KEY=your-api-key-here
+
+# Base URL for third-party providers (optional)
+# ANTHROPIC_BASE_URL=https://your-provider.com/v1
+
+# Default model (optional)
+# ANTHROPIC_MODEL=claude-sonnet-4-20250514
 EOF
 ```
+
+The CLI looks for `.env` files in this order:
+1. Current working directory (`./.env`)
+2. Global config (`~/.moles/.env`)
+3. Home directory (`~/.env.moles`)
 
 ## Usage
 
 ### Generate Documentation
 
 ```bash
-# Interactive mode
+# Interactive mode (prompts for options)
 moles
 
-# Quick mode (skip prompts)
+# Quick mode with defaults
 moles -y
-
-# Specify language
-moles -l zh  # Chinese
-moles -l en  # English
 
 # Specify target directory
 moles /path/to/project
 
-# All options
+# Choose documentation language
+moles -l zh  # Chinese
+moles -l en  # English (default)
+
+# Show verbose agent reasoning
+moles -v
+
+# Full options
 moles [directory] [options]
-  -o, --output <dir>   Output directory (default: "./docs")
-  -v, --verbose        Show detailed reasoning
-  -m, --model <model>  LLM model to use
-  -l, --language <lang> Documentation language (en/zh)
-  -y, --yes            Skip interactive prompts
+  -o, --output <dir>     Output directory (default: "./docs")
+  -v, --verbose          Show detailed agent reasoning
+  -m, --model <model>    LLM model to use
+  -l, --language <lang>  Documentation language (en/zh)
+  -y, --yes              Skip interactive prompts
+  --api-key <key>        API key (overrides env var)
+  --base-url <url>       API base URL (overrides env var)
 ```
 
 ### Preview Documentation
 
 ```bash
-# Start dev server
+# Start development server (default port 5173)
 moles serve
 
 # Custom port
@@ -75,61 +137,82 @@ moles serve -p 3000
 
 # Expose to network
 moles serve --host
+
+# Specify docs directory
+moles serve ./custom-docs
 ```
 
 ### Build for Production
 
 ```bash
+# Build static site
 moles build
+
+# Output: ./docs/.vitepress/dist/
 ```
 
-## How It Works
+## State Files
 
-Moles uses an AI agent with a **Plan → Execute → Reflect → Generate** loop:
-
-1. **Planning**: Analyzes codebase structure and creates exploration plan (5-8 steps)
-2. **Executing**: Runs ReAct loop to understand code using tools (read files, search, etc.)
-3. **Reflecting**: Evaluates documentation completeness and adjusts plan if needed
-4. **Generating**: Creates VitePress documentation site
-
-### State Files
-
-During analysis, Moles saves state to `.moles/` directory:
+During analysis, Moles saves its state to the `.moles/` directory in the target project:
 
 ```
 .moles/
-├── plan.md          # Current plan with step status
-├── memory.json      # Analyzed files and insights
-└── progress.log     # Execution log
+├── plan.md          # Current exploration plan with step status
+├── memory.json      # Analyzed files, insights, and doc sections
+└── progress.log     # Execution log with timestamps
 ```
 
+This provides transparency into the agent's reasoning and enables resumption of interrupted analysis.
+
 ## Output Structure
+
+The generated documentation follows VitePress conventions:
 
 ```
 docs/
 ├── .vitepress/
-│   └── config.ts    # VitePress configuration
-├── index.md         # Homepage
-├── architecture/    # Architecture docs
-├── modules/         # Module docs
+│   └── config.mjs   # VitePress configuration (sidebar, navigation)
+├── index.md         # Homepage with hero section
+├── overview/        # Project overview
+├── architecture/    # Architecture documentation
+├── modules/         # Module-level documentation
 ├── api/             # API reference
-└── guide/           # Guides
+└── guide/           # Usage guides
 ```
+
+## Available Tools
+
+The agent uses these tools to analyze codebases:
+
+| Tool | Description |
+|------|-------------|
+| `list_files` | List directory contents with glob filtering |
+| `read_file` | Read file contents (full or line range) |
+| `search_code` | Search for patterns across files (regex supported) |
+| `write_doc` | Save documentation section to memory |
+| `add_insight` | Record key insights about the codebase |
+| `mark_file_analyzed` | Mark a file as analyzed with summary |
 
 ## Development
 
 ```bash
-# Build
+# Build TypeScript
 npm run build
 
-# Watch mode
+# Watch mode for development
 npm run dev
 
-# Type check
+# Type checking
 npm run typecheck
 
-# Lint
+# Lint with Biome
 npm run lint
+
+# Format with Biome
+npm run format
+
+# Check and fix (lint + format)
+npm run check
 ```
 
 ## License
